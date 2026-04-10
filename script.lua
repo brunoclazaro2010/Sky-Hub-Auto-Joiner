@@ -267,7 +267,7 @@ local function getHighestValue()
     return highest
 end
 
--- // Lógica de Server Hop (modificada para salvar o JobId)
+-- // Lógica de Server Hop MODIFICADA (servidor aleatório)
 local function doServerHop()
     if not hopActive then return end
     
@@ -287,35 +287,50 @@ local function doServerHop()
     
     local decoded = HttpService:JSONDecode(content)
     
-    if decoded and decoded.data then
+    if decoded and decoded.data and #decoded.data > 0 then
+        -- Coleta TODOS os servidores disponíveis
+        local availableServers = {}
         for _, server in ipairs(decoded.data) do
-            if not hopActive then break end
-            
             if server.playing < server.maxPlayers 
             and server.id ~= game.JobId 
             and not isBlacklisted(server.id) then
-                
-                addServerToBlacklist(server.id)
-                statusLabel.Text = "Status: Teleportando..."
-                
-                -- SALVA O JOBID DO SERVIDOR QUE VAMOS ENTRAR
-                currentServerJobId = server.id
-                saveJobIdToFile(currentServerJobId)
-                print("[SkyHub] 📌 JobId salvo para este servidor: " .. currentServerJobId)
-                
-                pcall(function()
-                    if autoModeEnabled then
-                        writefile(folderName .. "/AutoMode.txt", "true")
-                    end
-                    TeleportService:TeleportToPlaceInstance(placeId, server.id, player)
-                end)
-                
-                task.wait(2)
+                table.insert(availableServers, server)
             end
         end
         
-        if hopActive then
-            statusLabel.Text = "Status: Nenhum serv. livre"
+        if #availableServers > 0 then
+            -- Embaralha a lista para ficar aleatório
+            for i = #availableServers, 2, -1 do
+                local j = math.random(i)
+                availableServers[i], availableServers[j] = availableServers[j], availableServers[i]
+            end
+            
+            -- Pega o primeiro da lista embaralhada (agora é aleatório)
+            local selectedServer = availableServers[1]
+            
+            addServerToBlacklist(selectedServer.id)
+            statusLabel.Text = "Status: Teleportando para servidor aleatório com " .. selectedServer.playing .. "/" .. selectedServer.maxPlayers .. " jogadores..."
+            
+            -- SALVA O JOBID DO SERVIDOR QUE VAMOS ENTRAR
+            currentServerJobId = selectedServer.id
+            saveJobIdToFile(currentServerJobId)
+            print("[SkyHub] 🎲 Servidor aleatório escolhido: " .. selectedServer.playing .. "/" .. selectedServer.maxPlayers .. " jogadores")
+            print("[SkyHub] 📌 JobId salvo para este servidor: " .. currentServerJobId)
+            
+            pcall(function()
+                if autoModeEnabled then
+                    writefile(folderName .. "/AutoMode.txt", "true")
+                end
+                TeleportService:TeleportToPlaceInstance(placeId, selectedServer.id, player)
+            end)
+            
+            task.wait(2)
+        else
+            statusLabel.Text = "Status: Nenhum servidor disponível"
+            if autoModeEnabled and hopActive then
+                task.wait(2)
+                doServerHop()
+            end
         end
     else
         statusLabel.Text = "Status: Lista vazia (tentando novamente...)"
@@ -1045,9 +1060,6 @@ task.spawn(function()
                 -- Marca este brainrot como já notificado
                 lastNotifiedBrainrot = brainrotId
                 
-                -- REMOVIDO: NÃO desliga o modo automático
-                -- O script continua tentando trocar de servidor normalmente
-                
                 task.delay(5, function()
                     notifyLabel:TweenPosition(UDim2.new(0, 0, 0, -40), "In", "Quad", 0.5, true)
                     notifyLabel.Text = ""
@@ -1114,12 +1126,9 @@ task.spawn(function()
             
             -- verifica brainrot
             if notifyLabel.Text ~= "" then
-                -- REMOVIDO: NÃO desliga o modo automático
-                -- autoModeEnabled = false
-                -- hopActive = false
-                statusLabel.Text = "Auto: Brainrot ativo, continuando busca..."
-                hopActive = true
-                doServerHop()
+                autoModeEnabled = false
+                hopActive = false
+                statusLabel.Text = "Auto: Encontrado!"
             else
                 statusLabel.Text = "Auto: Continuando..."
                 hopActive = true
