@@ -1126,9 +1126,12 @@ task.spawn(function()
             
             -- verifica brainrot
             if notifyLabel.Text ~= "" then
-                autoModeEnabled = false
-                hopActive = false
-                statusLabel.Text = "Auto: Encontrado!"
+                -- MODIFICADO: NÃO desliga o modo automático
+                -- autoModeEnabled = false
+                -- hopActive = false
+                statusLabel.Text = "Auto: Brainrot detectado, continuando busca..."
+                hopActive = true
+                doServerHop()
             else
                 statusLabel.Text = "Auto: Continuando..."
                 hopActive = true
