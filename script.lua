@@ -31,18 +31,13 @@ local espGui
 -- Variável para armazenar o JobId atual (salvo quando teleporta)
 local currentServerJobId = nil
 
--- ========== PASTA SEPARADA POR CONTA ==========
-local playerName = player.Name
-local safeName = playerName:gsub("[^%w]", "_")
-local folderName = "SkyHub_" .. safeName
+-- // Sistema de Arquivos e Configurações
+local folderName = "SkyHub"
 local fileName = folderName .. "/Config.json"
 local jobIdFile = folderName .. "/CurrentJobId.txt"
 
-print("[SkyHub] 📁 Pasta da conta '" .. playerName .. "': " .. folderName)
-
 if makefolder and not isfolder(folderName) then
     makefolder(folderName)
-    print("[SkyHub] 📂 Pasta criada: " .. folderName)
 end
 
 -- Função para salvar JobId em arquivo
@@ -65,16 +60,6 @@ local function loadJobIdFromFile()
     end
     return nil
 end
-
--- ========== CRIA UM OFFSET DIFERENTE PARA CADA CONTA ==========
--- Isso evita que todas as contas façam a mesma requisição ao mesmo tempo
-local accountHash = 0
-for i = 1, #playerName do
-    accountHash = accountHash + string.byte(playerName, i)
-end
-local apiOffset = (accountHash % 50) + 1  -- Número entre 1 e 50
-print("[SkyHub] 🔑 Offset da API para esta conta: " .. apiOffset)
--- ============================================================
 
 -- ==================== DISCORD WEBHOOK ====================
 local discordWebhookEnabled = true
@@ -146,7 +131,7 @@ local function saveSettings()
     writefile(fileName, HttpService:JSONEncode(config))
 end
 
--- // Sistema de Blacklist de Servidores (agora dentro da pasta da conta)
+-- // Sistema de Blacklist de Servidores
 local blacklistFile = folderName .. "/ServerBlacklist.json"
 local serverBlacklist = {}
 
@@ -282,15 +267,14 @@ local function getHighestValue()
     return highest
 end
 
--- // Lógica de Server Hop MODIFICADA (servidor aleatório + continua tentando em caso de erro)
+-- // Lógica de Server Hop MODIFICADA (servidor aleatório)
 local function doServerHop()
     if not hopActive then return end
     
-    statusLabel.Text = "Status: Buscando servidor aleatório..."
+    statusLabel.Text = "Status: Iniciando busca..."
     
     local placeId = game.PlaceId
-    -- Usa offset diferente para cada conta (evita rate limit)
-    local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100&cursor=" .. apiOffset
+    local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100"
     
     local success, content = pcall(function()
         return game:HttpGet(url)
@@ -298,8 +282,6 @@ local function doServerHop()
     
     if not success or not content or not hopActive then
         statusLabel.Text = "Status: Erro ou Parado"
-        task.wait(2)
-        if hopActive then doServerHop() end
         return
     end
     
@@ -323,53 +305,26 @@ local function doServerHop()
                 availableServers[i], availableServers[j] = availableServers[j], availableServers[i]
             end
             
-            -- Tenta teleportar para um servidor (se falhar, continua tentando outros)
-            local teleportSuccess = false
-            for _, server in ipairs(availableServers) do
-                if not hopActive then break end
-                
-                if server.playing < server.maxPlayers and not isBlacklisted(server.id) then
-                    statusLabel.Text = "Status: Tentando servidor com " .. server.playing .. "/" .. server.maxPlayers .. " jogadores..."
-                    print("[SkyHub] 🎲 Tentando servidor: " .. server.playing .. "/" .. server.maxPlayers .. " jogadores")
-                    
-                    addServerToBlacklist(server.id)
-                    currentServerJobId = server.id
-                    saveJobIdToFile(currentServerJobId)
-                    
-                    local teleportOk = pcall(function()
-                        TeleportService:TeleportToPlaceInstance(placeId, server.id, player)
-                    end)
-                    
-                    if teleportOk then
-                        print("[SkyHub] ✅ Teleporte iniciado com sucesso para: " .. server.id)
-                        teleportSuccess = true
-                        break
-                    else
-                        print("[SkyHub] ❌ Falha ao teleportar para: " .. server.id)
-                        -- Fecha possíveis popups de erro
-                        pcall(function()
-                            local coreGui = game:GetService("CoreGui")
-                            for _, v in pairs(coreGui:GetDescendants()) do
-                                if v:IsA("TextButton") and v.Visible then
-                                    local txt = v.Text:lower()
-                                    if txt:find("ok") or txt:find("confirm") or txt:find("fechar") or txt:find("close") then
-                                        v:Click()
-                                    end
-                                end
-                            end
-                        end)
-                        task.wait(1)
-                        -- CONTINUA tentando o próximo servidor
-                    end
-                end
-            end
+            -- Pega o primeiro da lista embaralhada (agora é aleatório)
+            local selectedServer = availableServers[1]
             
-            if not teleportSuccess and hopActive then
-                statusLabel.Text = "Status: Todas as tentativas falharam, tentando novamente..."
-                print("[SkyHub] ⚠️ Todas as tentativas falharam, reiniciando busca...")
-                task.wait(3)
-                if hopActive then doServerHop() end
-            end
+            addServerToBlacklist(selectedServer.id)
+            statusLabel.Text = "Status: Teleportando para servidor aleatório com " .. selectedServer.playing .. "/" .. selectedServer.maxPlayers .. " jogadores..."
+            
+            -- SALVA O JOBID DO SERVIDOR QUE VAMOS ENTRAR
+            currentServerJobId = selectedServer.id
+            saveJobIdToFile(currentServerJobId)
+            print("[SkyHub] 🎲 Servidor aleatório escolhido: " .. selectedServer.playing .. "/" .. selectedServer.maxPlayers .. " jogadores")
+            print("[SkyHub] 📌 JobId salvo para este servidor: " .. currentServerJobId)
+            
+            pcall(function()
+                if autoModeEnabled then
+                    writefile(folderName .. "/AutoMode.txt", "true")
+                end
+                TeleportService:TeleportToPlaceInstance(placeId, selectedServer.id, player)
+            end)
+            
+            task.wait(2)
         else
             statusLabel.Text = "Status: Nenhum servidor disponível"
             if autoModeEnabled and hopActive then
@@ -1172,6 +1127,8 @@ task.spawn(function()
             -- verifica brainrot
             if notifyLabel.Text ~= "" then
                 -- MODIFICADO: NÃO desliga o modo automático
+                -- autoModeEnabled = false
+                -- hopActive = false
                 statusLabel.Text = "Auto: Brainrot detectado, continuando busca..."
                 hopActive = true
                 doServerHop()
